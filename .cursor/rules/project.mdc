@@ -1,0 +1,150 @@
+
+# Context Compressor — Project Outline
+
+## Overview
+Middleware that takes a query and many retrieved passages and returns a compact, diverse, citation-preserving context within token budget B, reducing cost/latency with minimal accuracy loss.
+
+## Objectives & KPIs
+- Token reduction: 50–70% vs. baseline context.
+- Quality: Delta(EM/P@5) >= -1 pt on a held-out QA set.
+- Latency: compressor p95 <= 40 ms (N <= 200, CPU).
+- Determinism: fixed-seed reproducibility.
+
+## Architecture
+retriever -> candidates (N~100–400)
+            |
+            v
+     Context Compressor
+   [ fusion | MMR | trimming ]
+            |
+            v
+      LLM prompt builder -> generate
+
+Inputs per candidate: {id, doc_id, section, page, text, tokens, bm25, dense_sim, embedding?}
+Outputs: context (<= B tokens), mapping, stats
+
+## Algorithms
+1) Rank Fusion
+   - z-score fusion: s = w_d*z(dense) + w_b*z(bm25), defaults (0.7, 0.3)
+   - Keep top-M (M=120) for the MMR pool.
+2) MMR Diversity (Budget-aware)
+   - score(i|S)=lambda*cos(q,e_i) - (1-lambda)*max_j cos(e_i,e_j), lambda=0.7
+   - Greedy add while sum(tokens) <= B with section caps K=2.
+3) In-chunk Trimming
+   - Split sentences; score by sentence-level sim + anchor hits (numbers/entities) + optional cross-encoder.
+   - Keep top sentences preserving order; maintain citation ids.
+4) Refit to Budget
+   - Enforce hard cap; soft overflow +15% before trimming.
+5) (Optional) Cross-encoder Rerank
+   - Reorder last ~30 spans if quality drop > 1 pt.
+
+## API
+- POST /compress (see contract in rule.md)
+- Flags: no_cache, use_reranker, params.section_cap, params.lambda
+
+## Data Model
+candidate = {
+  "id": "c_001", "doc_id": "d_01", "section": "Results", "page": 14,
+  "text": "...", "tokens": 220, "bm25": 7.2, "dense_sim": 0.81,
+  "embedding": [0.1, 0.2]
+}
+mapping[i] preserves {id, doc_id, section, page, tokens, trimmed} for citations.
+
+## Functional Requirements
+1) Rank Fusion: z-score fusion of dense and BM25: s = w_d*z(dense) + w_b*z(bm25); defaults w_d=0.7, w_b=0.3. Keep top-M (M=120).
+2) Diversity (MMR): greedy selection under budget B: score(i|S) = lambda*cos(q,e_i) - (1-lambda)*max_j cos(e_i, e_j); default lambda=0.7.
+3) Section Caps: at most K chunks per section (default K=2).
+4) In-chunk Trimming: rank sentences by (a) sentence-query sim, (b) anchor hits (numbers/entities), (c) optional cross-encoder; keep order.
+5) Budget Fit: enforce sum(tokens) <= B. Allow soft overflow (+15%) before trimming; hard cap enforced.
+6) Outputs: (a) context <= B tokens, (b) mapping with ids/sections/pages/tokens/trimmed, (c) stats (budget, used, saved, lambda, fusion weights, section cap).
+7) Caching: key = (q_hash, corpus_hash, B, params_hash) with TTL; bypass via no_cache=true.
+8) Determinism: stable sort on ties; fixed seeds.
+
+## Non-Functional Requirements
+- Throughput: >= 100 req/s on 1 vCPU for N <= 200 (no reranker).
+- Observability: export timings for fusion, MMR, trimming; log tokens before/after.
+- Fail-soft: if output uses < 30% of B, set low_context=true to request expansion or refetch.
+
+## API Contract
+Request
+{
+  "q": "string",
+  "B": 1500,
+  "candidates": [
+    {
+      "id": "c_001",
+      "doc_id": "d_01",
+      "section": "Results",
+      "page": 14,
+      "text": "...",
+      "tokens": 220,
+      "bm25": 7.2,
+      "dense_sim": 0.81,
+      "embedding": [0.1, 0.2]
+    }
+  ],
+  "params": {
+    "fusion_weights": {"dense": 0.7, "bm25": 0.3},
+    "lambda": 0.7,
+    "section_cap": 2,
+    "use_reranker": false
+  }
+}
+
+Response
+{
+  "context": "...compressed spans...",
+  "mapping": [
+    {"id":"c_001","doc_id":"d_01","section":"Results","page":14,"tokens":120,"trimmed":true}
+  ],
+  "stats": {
+    "budget":1500,"used":980,"saved_vs_pool":4320,
+    "lambda":0.7,"fusion_weights":{"dense":0.7,"bm25":0.3},"section_cap":2,
+    "low_context": false
+  }
+}
+
+## Testing & Benchmarks
+- Unit: fusion math, MMR selection, sentence trimming, budget fit, determinism.
+- Property: never exceed B; trimming preserves sentence order; section cap honored.
+- Perf: synthetic N=200; assert p95 < 40 ms (no reranker).
+- A/B: compute Delta(EM/P@5) vs. baseline on a small QA set.
+
+## Implementation Order (Strict)
+1) Types & pydantic schemas; token counter util.
+2) Fusion -> top-M cut.
+3) MMR selection with budget & section caps.
+4) Sentence splitter + trimmer (anchor-aware).
+5) Refit to budget; mapping & stats.
+6) FastAPI endpoint + minimal CLI.
+7) Tests (unit/perf); benchmarks.
+8) Optional cross-encoder flag guarded.
+
+## When to Ask
+- Token counter source (tiktoken model)?
+- Are embeddings provided or computed here?
+- Default B and latency target?
+- Include cross-encoder in v1?
+
+## Observability
+- Timers: fusion_ms, mmr_ms, trim_ms, total_ms
+- Counters: tokens_in, tokens_out, saved_vs_pool
+- Flag: low_context when used <30% of B
+
+## Testing
+- Unit: fusion math, budget fit, section caps, determinism
+- Property: trimming keeps sentence order; never exceed B
+- Perf: synthetic N=200, p95 < 40 ms (no reranker)
+- Golden set: stable selections for 10–20 queries
+- A/B eval: Delta(EM/P@5) vs. baseline
+
+## Milestones (2–3 weeks)
+- W1: Schemas, fusion, MMR, unit tests
+- W2: Trimming, API, perf tests, caching
+- W3: A/B eval harness, README, optional reranker
+
+## Deliverables
+- Python package context_compressor/
+- FastAPI service with /compress
+- Tests + benchmark scripts
+- README with metrics & usage
