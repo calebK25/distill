@@ -1,0 +1,1 @@
+{"timestamp": "2025-08-07T00:23:12.231624", "level": "INFO", "logger": "context_compressor", "message": "Performance optimizer initialized", "module": "", "function": null, "line": 0, "caching": true, "batching": true, "memory_management": true}
