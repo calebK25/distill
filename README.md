@@ -32,8 +32,10 @@ pip install -e .
 # Set your OpenRouter API key
 $env:OPENROUTER_API_KEY="your_api_key_here"
 
-# Run interactive analysis
-python interactive_pdf_qa.py
+# Run interactive analysis (choose one):
+python run_interactive.py
+# OR
+python main.py  # Then select option 1
 ```
 
 #### Interactive Workflow
@@ -41,7 +43,7 @@ python interactive_pdf_qa.py
 The system guides you through a step-by-step process:
 
 **Step 1: PDF Selection**
-- Enter the path to your PDF file (default: "2502.15840v1.pdf")
+- Enter the path to your PDF file
 - System validates the file exists and is accessible
 
 **Step 2: Question Input**
@@ -427,8 +429,10 @@ fine_tuner.train_cross_encoder(training_data, model_name="custom-cross-encoder")
 For production deployment, use the integrated QA system:
 
 ```bash
-# Start the server
-python integrated_qa_system.py
+# Start the server (choose one):
+python run_api.py
+# OR
+python main.py  # Then select option 2
 
 # Access API endpoints
 curl -X POST "http://localhost:8000/qa" \
@@ -459,13 +463,16 @@ curl -X POST "http://localhost:8000/qa" \
 
 ```bash
 # Run interactive analysis
-python interactive_pdf_qa.py
+python run_interactive.py
 
 # Test specific components
 python -m pytest tests/
 
 # Performance testing
 python -m pytest tests/test_performance.py
+
+# Or use the main menu
+python main.py  # Then select option 3
 ```
 
 ## License
