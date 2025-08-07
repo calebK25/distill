@@ -323,7 +323,7 @@ def main():
     print("="*60)
     
     # Get PDF path
-    pdf_path = get_user_input("Enter PDF file path", "2502.15840v1.pdf")
+    pdf_path = get_user_input("Enter PDF file path")
     
     if not Path(pdf_path).exists():
         print(f"Error: PDF file not found: {pdf_path}")

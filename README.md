@@ -36,11 +36,62 @@ $env:OPENROUTER_API_KEY="your_api_key_here"
 python interactive_pdf_qa.py
 ```
 
-The interactive system will guide you through:
-1. Selecting a PDF file
-2. Entering your question
-3. Configuring analysis parameters
-4. Viewing comprehensive results
+#### Interactive Workflow
+
+The system guides you through a step-by-step process:
+
+**Step 1: PDF Selection**
+- Enter the path to your PDF file (default: "2502.15840v1.pdf")
+- System validates the file exists and is accessible
+
+**Step 2: Question Input**
+- Type your question about the document
+- Examples: "What are the main findings?", "How does the methodology work?"
+- Type 'quit' to exit the system
+
+**Step 3: Parameter Configuration**
+- **Compression Parameters**: Control how content is selected and compressed
+- **LLM Parameters**: Control answer generation and model selection
+- **API Configuration**: Set up authentication for language models
+
+**Step 4: Analysis & Results**
+- System processes your request and displays comprehensive results
+- Includes answer, citations, compression stats, and performance metrics
+- Option to ask follow-up questions or start over
+
+#### Example Interactive Session
+
+```
+INTERACTIVE PDF QUESTION-ANSWERING SYSTEM
+============================================================
+Enter PDF file path (default: 2502.15840v1.pdf): topology_paper.pdf
+PDF found: topology_paper.pdf
+
+------------------------------------------------------------
+
+Enter your question (or 'quit' to exit): What are the key topological concepts discussed?
+
+============================================================
+CONFIGURE ANALYSIS PARAMETERS
+============================================================
+
+COMPRESSION PARAMETERS:
+Token budget for compression (default: 800): 1000
+MMR lambda (diversity vs relevance) (default: 0.7): 0.8
+Document cap (max chunks per doc) (default: 8): 10
+Top M candidates for selection (default: 200): 250
+Use auto-router for CDC/SDM (default: Y): Y
+
+LLM PARAMETERS:
+Model ID (default: qwen/qwen3-8b:free): anthropic/claude-3.5-sonnet
+Max tokens to generate (default: 1024): 1200
+Generation temperature (default: 0.1): 0.1
+
+OpenRouter API key (or press Enter to use environment variable): 
+
+Analyzing: What are the key topological concepts discussed?
+Please wait...
+```
 
 ### Programmatic Usage
 
@@ -74,19 +125,43 @@ print(response.context)
 - Handles complex document layouts
 - Provides content diagnosis and error handling
 
-#### 2. **ContextCompressor**
+#### 2. **Document Chunks (The Building Blocks)**
+- **What they are**: Segmented pieces of text extracted from PDF documents
+- **How they're created**: The extractor breaks down PDF content into meaningful units:
+  - Paragraphs or sections of text
+  - Sentences grouped together
+  - Logical content blocks (headers, body text, captions)
+  - Page-based segments with location information
+- **What each chunk contains**:
+  ```python
+  {
+      "text": "The study found a 25% improvement in accuracy...",
+      "tokens": 25,
+      "section": "Results",
+      "page": 14,
+      "id": "chunk_001",
+      "doc_id": "paper_2024"
+  }
+  ```
+- **Why they matter**: 
+  - Enable selective compression (only relevant chunks are kept)
+  - Allow for 90-95% token reduction while maintaining quality
+  - Provide traceable citations back to specific document sections
+  - Enable parallel processing and memory optimization
+
+#### 3. **ContextCompressor**
 - Main compression orchestrator
 - Implements CDC/SDM logic with auto-routing
 - Manages token budgets and constraints
 - Provides comprehensive statistics
 
-#### 3. **EnhancedMultimodalCompressor**
+#### 4. **EnhancedMultimodalCompressor**
 - Handles multimodal content compression
 - Balances text, image, and table content
 - Optimizes for different content types
 - Provides modality-specific analysis
 
-#### 4. **Auto-Router**
+#### 5. **Auto-Router**
 - Analyzes content characteristics
 - Calculates `top1_doc_frac` and `entropy`
 - Automatically selects CDC or SDM mode
@@ -109,25 +184,154 @@ print(response.context)
 - **Parameters**: `lambda_` controls diversity vs relevance trade-off
 - **Benefits**: Reduces redundancy while maintaining coverage
 
+### Compression Pipeline Explained
+
+Here's how the system processes your document and question:
+
+**Stage 1: Document Extraction**
+```
+PDF Document → MultimodalExtractor → 300+ Document Chunks
+```
+
+**Stage 2: Initial Ranking**
+```
+All Chunks → BM25 + Dense Similarity Scoring → Top M Candidates (200 by default)
+```
+
+**Stage 3: MMR Selection**
+```
+Top M Candidates → MMR Algorithm (λ=0.7) → Selected Chunks (respecting Document Cap)
+```
+
+**Stage 4: Context Assembly**
+```
+Selected Chunks → Token Budget Check (800 tokens) → Final Compressed Context
+```
+
+**Stage 5: LLM Generation**
+```
+Compressed Context + Question → Language Model → Answer with Citations
+```
+
+**Key Parameters in Action:**
+- **Top M (200)**: Limits initial candidates for performance
+- **MMR Lambda (0.7)**: Balances relevance vs diversity in selection
+- **Document Cap (8)**: Ensures representation across sections
+- **Token Budget (800)**: Final limit on context size
+- **Auto-Router**: Chooses CDC vs SDM based on document structure
+
 ## Configuration Parameters
 
-### Compression Settings
+### Interactive Script Options
 
-| Parameter | Range | Default | Description |
-|-----------|-------|---------|-------------|
-| `token_budget` | 100-2000 | 800 | Maximum tokens for compressed output |
-| `lambda_` | 0.0-1.0 | 0.7 | MMR diversity parameter (higher = more diverse) |
-| `doc_cap` | 1-20 | 8 | Maximum chunks per document |
-| `top_m` | 50-500 | 200 | Initial candidate selection pool |
-| `auto_router` | bool | True | Enable automatic CDC/SDM selection |
+When using `python interactive_pdf_qa.py`, you'll be prompted to configure these parameters:
 
-### LLM Settings
+#### Compression Parameters
 
-| Parameter | Range | Default | Description |
-|-----------|-------|---------|-------------|
-| `model_id` | string | "qwen/qwen3-8b:free" | OpenRouter model identifier |
-| `max_tokens` | 50-2000 | 1024 | Maximum tokens to generate |
-| `temperature` | 0.0-1.0 | 0.1 | Generation creativity (lower = more factual) |
+**Token Budget (100-2000, default: 800)**
+- **What it does**: Sets the maximum number of tokens allowed in the compressed context sent to the LLM
+- **Technical details**: This is the hard limit on how much content the system can include in the final compressed context. The system will stop adding chunks once this limit is reached, even if more relevant content exists.
+- **Lower values (400-600)**: Faster processing, less detailed answers, lower cost, may miss important context
+- **Higher values (1000-1200)**: More comprehensive answers, slower processing, higher cost, includes more context
+- **Recommendation**: Start with 800, increase for complex questions, decrease for quick summaries
+
+**MMR Lambda (0.0-1.0, default: 0.7)**
+- **What it does**: Controls the balance between relevance and diversity in the Maximal Marginal Relevance algorithm
+- **Technical details**: MMR uses this formula: `score = λ × relevance + (1-λ) × diversity`. Lambda controls the trade-off:
+  - λ = 0.0: Only diversity matters (maximally diverse selection)
+  - λ = 1.0: Only relevance matters (most relevant content only)
+  - λ = 0.7: Balanced approach (70% relevance, 30% diversity)
+- **Lower values (0.3-0.5)**: Focus on most relevant content, may miss important context, less redundancy
+- **Higher values (0.8-1.0)**: Prioritize diverse content, covers more topics but may include less relevant info, more redundancy
+- **Recommendation**: 0.7 provides good balance, use 0.5 for focused questions, 0.9 for broad analysis
+
+**Document Cap (1-20, default: 8)**
+- **What it does**: Maximum number of text chunks that can be selected from each document section (e.g., Introduction, Methods, Results)
+- **Technical details**: This prevents the system from selecting too many chunks from a single section, ensuring representation across the entire document. For example, if set to 8, the system can select at most 8 chunks from the "Introduction" section, 8 from "Methods", etc.
+- **Lower values (3-5)**: More focused selection, faster processing, may miss important details in long sections
+- **Higher values (12-15)**: More comprehensive coverage, includes more context, may include redundant information
+- **Recommendation**: 8 works well for most documents, increase for complex papers with long sections, decrease for simple documents
+
+**Top M Candidates (50-500, default: 200)**
+- **What it does**: Number of initial candidates considered in the first stage of selection before applying MMR
+- **Technical details**: The system first ranks all document chunks by relevance (using BM25 + dense similarity scores), then takes the top M candidates for MMR selection. This is a performance optimization - instead of running MMR on all 1000+ chunks, it runs on the top 200 most relevant ones.
+- **Lower values (100-150)**: Faster processing, may miss some relevant content that wasn't in the top candidates
+- **Higher values (300-400)**: More thorough analysis, slower processing, considers more candidates
+- **Recommendation**: 200 is optimal for most cases, increase for large documents with many sections, decrease for memory constraints
+
+**Auto-Router (Y/N, default: Y)**
+- **What it does**: Automatically chooses between Cross-Document Compression (CDC) and Single-Document Mode (SDM) based on content analysis
+- **Technical details**: The router analyzes the document structure and calculates:
+  - `top1_doc_frac`: Fraction of top candidates from the same document (1.0 = single document)
+  - `entropy`: Diversity measure of candidate distribution across documents
+  - If `top1_doc_frac > 0.8` and `entropy < 0.3`, it switches to SDM mode
+- **Yes**: System analyzes content and picks the best mode automatically, optimizes for your specific document
+- **No**: Forces CDC mode (useful for multi-document scenarios or when you want consistent behavior)
+- **Recommendation**: Keep enabled unless you have specific requirements or want to force CDC mode
+
+#### LLM Parameters
+
+**Model ID (default: "qwen/qwen3-8b:free")**
+- **What it does**: Specifies which language model to use for generating answers
+- **Free models**: "qwen/qwen3-8b:free", "meta-llama/llama-3.1-8b:free"
+- **Paid models**: "openai/gpt-4o", "anthropic/claude-3.5-sonnet", "google/gemini-pro"
+- **Recommendation**: Start with free models, upgrade to paid for better quality
+
+**Max Tokens (50-2000, default: 1024)**
+- **What it does**: Maximum length of the generated answer
+- **Lower values (300-500)**: Concise answers, faster generation
+- **Higher values (1500-2000)**: Detailed explanations, longer generation time
+- **Recommendation**: 1024 provides good detail, adjust based on question complexity
+
+**Temperature (0.0-1.0, default: 0.1)**
+- **What it does**: Controls creativity vs factual accuracy in responses
+- **Lower values (0.0-0.2)**: More factual, consistent answers
+- **Higher values (0.7-1.0)**: More creative, varied responses
+- **Recommendation**: 0.1 for academic/research questions, 0.3-0.5 for creative analysis
+
+#### API Configuration
+
+**OpenRouter API Key**
+- **What it does**: Authentication for accessing language models
+- **Required**: Yes (unless using local models)
+- **How to get**: Sign up at openrouter.ai and generate an API key
+- **Security**: Can use environment variable `OPENROUTER_API_KEY` instead of entering directly
+
+### Parameter Optimization Guide
+
+#### For Speed Optimization
+```
+Token Budget: 400-600
+Top M Candidates: 100-150
+Max Tokens: 512
+Model: qwen/qwen3-8b:free
+```
+
+#### For Quality Optimization
+```
+Token Budget: 1000-1200
+Top M Candidates: 300-400
+Max Tokens: 1500
+Model: openai/gpt-4o
+Temperature: 0.1
+```
+
+#### For Memory-Constrained Systems
+```
+Token Budget: 600
+Top M Candidates: 100
+Document Cap: 5
+Max Tokens: 800
+```
+
+#### For Academic Research
+```
+Token Budget: 1000
+MMR Lambda: 0.8
+Document Cap: 10
+Temperature: 0.1
+Model: anthropic/claude-3.5-sonnet
+```
 
 ## Analysis Output
 
@@ -250,31 +454,6 @@ curl -X POST "http://localhost:8000/qa" \
 - **Memory Usage**: Optimized for production deployment
 - **Accuracy**: Maintains answer quality despite compression
 
-## Development
-
-### Project Structure
-
-```
-context_compressor/
-├── compressor.py                    # Main compression logic
-├── multimodal_extractor.py         # PDF extraction
-├── enhanced_multimodal_compressor.py # Multimodal processing
-├── schemas.py                      # Data models
-├── router.py                       # CDC/SDM routing
-├── mmr.py                          # MMR selection
-├── fusion.py                       # Rank fusion
-├── fine_tuning/                    # Model fine-tuning framework
-│   ├── fine_tuner.py              # Training orchestration
-│   ├── anchor_extractor.py        # Key information extraction
-│   ├── oracle_creator.py          # Optimal selection creation
-│   └── data_generator.py          # Training data generation
-└── logging_config.py              # Production logging
-
-integrated_qa_system.py            # Web API server
-interactive_pdf_qa.py              # Interactive terminal interface
-openrouter_integration.py          # OpenRouter LLM integration
-llm_integration.py                 # Local LLM integration
-```
 
 ### Testing
 
@@ -289,58 +468,7 @@ python -m pytest tests/
 python -m pytest tests/test_performance.py
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-1. **PDF Extraction Errors**
-   - Ensure PDF is not password-protected
-   - Check for corrupted PDF files
-   - Verify sufficient disk space for temporary files
-
-2. **LLM API Errors**
-   - Verify OpenRouter API key is valid
-   - Check API rate limits and quotas
-   - Ensure stable internet connection
-
-3. **Memory Issues**
-   - Reduce `top_m` parameter for large documents
-   - Lower `token_budget` for memory-constrained environments
-   - Use smaller models for local deployment
-
-### Performance Tuning
-
-1. **For Faster Processing**
-   - Reduce `token_budget` to 400-600
-   - Lower `top_m` to 100-150
-   - Use smaller LLM models
-
-2. **For Better Quality**
-   - Increase `token_budget` to 1000-1200
-   - Raise `top_m` to 300-400
-   - Use larger, more capable models
-
-3. **For Memory Optimization**
-   - Enable model caching
-   - Use batch processing
-   - Implement memory monitoring
-
 ## License
 
 MIT License - see LICENSE file for details.
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## Support
-
-For issues and questions:
-- Check the troubleshooting section
-- Review the configuration parameters
-- Test with the interactive interface
-- Open an issue on GitHub
